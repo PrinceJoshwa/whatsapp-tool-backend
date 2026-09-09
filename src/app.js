@@ -6,6 +6,7 @@ import { adminRequired, authRequired, signUser } from './auth.js';
 import { getDb } from './db.js';
 import { getQrSession, logoutQrSession, sendQrMessage, startQrSession } from './whatsappSession.js';
 import crmRouter from './crm.js';
+import { sendWhatsAppMessage } from './whatsappProvider.js';
 
 const app = express();
 
@@ -198,23 +199,10 @@ app.post('/api/whatsapp/send', authRequired, async (req, res, next) => {
       return res.json({ status: 'success', result: providerResult });
     }
 
-    const token = account?.accessToken || process.env.META_ACCESS_TOKEN;
-    const phoneNumberId = account?.phoneNumberId || process.env.META_PHONE_NUMBER_ID;
-    if (!token || !phoneNumberId) {
-      return res.status(400).json({ error: 'WhatsApp Cloud API credentials are not configured' });
-    }
-
-    const version = process.env.META_API_VERSION || 'v21.0';
-    const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: message } }),
-    });
-    const providerResult = await response.json();
-    await db.collection('messages').insertOne({ to, message, providerResult, status: response.ok ? 'sent' : 'failed', createdAt: new Date() });
-    if (response.ok) await recordOutbound(db, account, to, message, providerResult);
-
-    res.status(response.ok ? 200 : 502).json({ status: response.ok ? 'success' : 'error', result: providerResult });
+    const providerResult = await sendWhatsAppMessage(account, to, message);
+    await db.collection('messages').insertOne({ to, message, providerResult, status: 'accepted', createdAt: new Date() });
+    await recordOutbound(db, account, to, message, providerResult);
+    res.json({ status: 'success', result: providerResult });
   } catch (error) {
     next(error);
   }
@@ -222,7 +210,7 @@ app.post('/api/whatsapp/send', authRequired, async (req, res, next) => {
 
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(500).json({ error: error.message || 'Server error' });
+  res.status(error.statusCode || 500).json({ error: error.message || 'Server error', code: error.code });
 });
 
 export default app;

@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { adminRequired, authRequired } from './auth.js';
 import { getDb } from './db.js';
 import { sendQrMessage } from './whatsappSession.js';
+import { sendWhatsAppMessage } from './whatsappProvider.js';
 
 const router = express.Router();
 router.use(authRequired);
@@ -16,18 +17,7 @@ async function deliver(db, account, to, message) {
     return sendQrMessage(account._id, to, message);
   }
 
-  const token = account?.accessToken || process.env.META_ACCESS_TOKEN;
-  const phoneNumberId = account?.phoneNumberId || process.env.META_PHONE_NUMBER_ID;
-  if (!token || !phoneNumberId) throw new Error('WhatsApp account credentials are not configured');
-  const version = process.env.META_API_VERSION || 'v21.0';
-  const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: message } }),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error?.message || 'WhatsApp provider rejected the message');
-  return result;
+  return sendWhatsAppMessage(account, to, message);
 }
 
 router.get('/stats', adminRequired, async (_req, res, next) => {

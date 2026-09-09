@@ -13,7 +13,10 @@ import path from 'node:path';
 import { getDb } from './db.js';
 
 const sessions = new Map();
-const sessionsRoot = path.resolve(process.env.WHATSAPP_SESSIONS_DIR || 'data/sessions');
+const runningOnVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
+const sessionsRoot = process.env.WHATSAPP_SESSIONS_DIR
+  ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
+  : (runningOnVercel ? '/tmp/whatsapp-sessions' : path.resolve('data/sessions'));
 
 function authPath(accountId) {
   return path.join(sessionsRoot, String(accountId));
@@ -42,6 +45,13 @@ function publicState(entry) {
 }
 
 export async function startQrSession(accountId) {
+  if (runningOnVercel) {
+    const error = new Error('QR WhatsApp connections require an always-on Node backend with persistent storage. Deploy the QR backend on Railway, Render, Fly.io, or a VPS; use Vercel for the React frontend and Cloud API.');
+    error.statusCode = 503;
+    error.code = 'QR_RUNTIME_REQUIRED';
+    throw error;
+  }
+
   const key = String(accountId);
   const existing = sessions.get(key);
   if (existing) return publicState(existing);
@@ -150,6 +160,12 @@ export async function startQrSession(accountId) {
 
         if (loggedOut && existsSync(authPath(accountId))) {
           await rm(authPath(accountId), { recursive: true, force: true });
+        }
+
+        if (!loggedOut) {
+          setTimeout(() => {
+            startQrSession(accountId).catch((error) => console.error('QR reconnect failed:', error.message));
+          }, 2000);
         }
       }
     } catch (error) {
